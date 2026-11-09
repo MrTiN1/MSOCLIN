@@ -1,0 +1,218 @@
+generator client {
+ provider = "prisma-client-js"
+}
+datasource db {
+ provider = "postgresql"
+ url = env("DATABASE_URL")
+}
+enum BookingStatus {
+ PENDING
+ CONFIRMED
+ IN_PROGRESS
+ COMPLETED
+ CANCELLED
+ EXPIRED
+}
+model User {
+ id String @id @default(cuid())
+ email String @unique
+ passwordHash String
+ role String @default("ADMIN")
+ sessionVersion Int @default(1)
+ createdAt DateTime @default(now())
+}
+model Customer {
+ id String @id @default(cuid())
+ name String
+ phone String
+ bookings Booking[]
+ createdAt DateTime @default(now())
+ @@index([phone])
+}
+model ServiceCategory {
+ id String @id @default(cuid())
+ name String
+ slug String @unique
+ services Service[]
+}
+model Service {
+ id String @id @default(cuid())
+ slug String @unique
+ title String
+ description String
+ image String
+ sourceUrl String
+ durationMinutes Int @default(120)
+ active Boolean @default(true)
+ categoryId String
+ category ServiceCategory @relation(fields:[categoryId], references:[id])
+ prices ServicePrice[]
+ items BookingItem[]
+}
+model ServicePrice {
+ id String @id @default(cuid())
+ serviceId String
+ service Service @relation(fields:[serviceId], references:[id], onDelete:Cascade)
+ label String
+ material String @default("synthetic")
+ amount Int
+ unit String @default("item")
+ preliminary Boolean @default(true)
+ @@unique([serviceId,label,material])
+}
+model Team {
+ id String @id @default(cuid())
+ name String
+ active Boolean @default(true)
+ travelMinutes Int @default(30)
+ members TeamMember[]
+ schedules TeamSchedule[]
+ exceptions ScheduleException[]
+ allocations BookingResourceAllocation[]
+}
+model TeamMember {
+ id String @id @default(cuid())
+ teamId String
+ team Team @relation(fields:[teamId],references:[id],onDelete:Cascade)
+ name String
+}
+model TeamSchedule {
+ id String @id @default(cuid())
+ teamId String
+ team Team @relation(fields:[teamId], references:[id],onDelete:Cascade)
+ weekday Int
+ startMinute Int
+ endMinute Int
+ breakStart Int?
+ breakEnd Int?
+ @@unique([teamId,weekday])
+}
+model ScheduleException {
+ id String @id @default(cuid())
+ teamId String
+ team Team @relation(fields:[teamId], references:[id],onDelete:Cascade)
+ startsAt DateTime @db.Timestamptz(3)
+ endsAt DateTime @db.Timestamptz(3)
+ reason String
+ @@index([teamId, startsAt, endsAt])
+}
+model Booking {
+ id String @id @default(cuid())
+ number String @unique
+ customerId String
+ customer Customer @relation(fields:[customerId],references:[id])
+ status BookingStatus @default(PENDING)
+ startsAt DateTime? @db.Timestamptz(3)
+ endsAt DateTime? @db.Timestamptz(3)
+ holdExpiresAt DateTime? @db.Timestamptz(3)
+ address String
+ comment String @default("")
+ internalComment String @default("")
+ total Int
+ quote Json
+ consentAt DateTime @default(now())
+ consentVersion String @default("2026-11-10")
+ idempotencyKey String @unique
+ accessTokenHash String
+ items BookingItem[]
+ allocations BookingResourceAllocation[]
+ history BookingStatusHistory[]
+ notifications NotificationLog[]
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([status, startsAt])
+ @@index([holdExpiresAt])
+}
+model BookingItem {
+ id String @id @default(cuid())
+ bookingId String
+ booking Booking @relation(fields:[bookingId],references:[id],onDelete:Cascade)
+ serviceId String
+ service Service @relation(fields:[serviceId],references:[id])
+ quantity Int
+ unitPrice Int
+ parameters Json
+}
+model BookingResourceAllocation {
+ id String @id @default(cuid())
+ bookingId String
+ booking Booking @relation(fields:[bookingId],references:[id],onDelete:Cascade)
+ teamId String
+ team Team @relation(fields:[teamId],references:[id])
+ startsAt DateTime @db.Timestamptz(3)
+ endsAt DateTime @db.Timestamptz(3)
+ active Boolean @default(true)
+ @@index([teamId,active,startsAt,endsAt])
+}
+model BookingStatusHistory {
+ id String @id @default(cuid())
+ bookingId String
+ booking Booking @relation(fields:[bookingId],references:[id],onDelete:Cascade)
+ status BookingStatus
+ actor String
+ createdAt DateTime @default(now())
+}
+model PortfolioItem {
+ id String @id @default(cuid())
+ title String
+ category String
+ beforeImage String
+ afterImage String
+ description String
+ rightsConfirmed Boolean @default(false)
+ published Boolean @default(false)
+ sourceUrl String?
+}
+model Review {
+ id String @id @default(cuid())
+ author String
+ text String
+ rating Int
+ sourceUrl String
+ source String
+ verified Boolean @default(false)
+ published Boolean @default(false)
+ createdAt DateTime @default(now())
+}
+model Promotion {
+ id String @id @default(cuid())
+ title String
+ description String
+ sourceUrl String
+ active Boolean @default(true)
+}
+model FAQ {
+ id String @id @default(cuid())
+ question String @unique
+ answer String
+ position Int @default(0)
+ published Boolean @default(true)
+}
+model SiteSettings {
+ key String @id
+ value Json
+}
+model NotificationLog {
+ id String @id @default(cuid())
+ bookingId String
+ booking Booking @relation(fields:[bookingId],references:[id],onDelete:Cascade)
+ status String @default("PENDING")
+ attempts Int @default(0)
+ error String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([status,createdAt])
+}
+model AuditLog {
+ id String @id @default(cuid())
+ actor String
+ action String
+ entityId String
+ details Json?
+ createdAt DateTime @default(now())
+}
+model RateLimit {
+ key String @id
+ hits Int @default(1)
+ resetAt DateTime
+}
