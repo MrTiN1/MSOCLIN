@@ -1,5 +1,6 @@
 .env.example
 .gitignore
+.vercelignore
 AGENTS.md
 ARCHITECTURE.md
 CONTENT_AUDIT.md
@@ -58,6 +59,7 @@ lib/catalog.ts
 lib/data.ts
 lib/db.ts
 lib/pricing.ts
+lib/request-origin.ts
 lib/scheduling.ts
 lib/security.ts
 lib/telegram.ts
@@ -89,6 +91,7 @@ scripts/prepare-e2e.ts
 scripts/prepare-test-db.ts
 scripts/refresh-local-content.ts
 scripts/retry-notifications.ts
+scripts/vercel-bootstrap.mjs
 tests/booking.integration.test.ts
 tests/e2e/site.spec.ts
 tests/unit.test.ts

@@ -8,6 +8,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { db } from "./db";
 import { NextRequest } from "next/server";
+import { allowedRequestOrigins } from "./request-origin";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -58,10 +59,11 @@ export function assertOrigin(req: NextRequest) {
   const origin = req.headers.get("origin");
   if (process.env.NODE_ENV === "production" && !process.env.APP_URL)
     throw new HttpError(503, "Адрес приложения не настроен");
-  const expected = process.env.APP_URL
-    ? new URL(process.env.APP_URL).origin
-    : `${req.nextUrl.protocol}//${req.headers.get("host")}`;
-  if (!origin || origin !== expected)
+  const expected = allowedRequestOrigins(
+    process.env,
+    `${req.nextUrl.protocol}//${req.headers.get("host")}`,
+  );
+  if (!origin || !expected.includes(origin))
     throw new HttpError(403, "Запрос отклонён. Обновите страницу");
 }
 export class HttpError extends Error {
