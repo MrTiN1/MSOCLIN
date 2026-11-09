@@ -1,3 +1,4 @@
+import { allowedRequestOrigins } from "../lib/request-origin";
 import { describe, it, expect } from "vitest";
 import { calculatePrice } from "../lib/pricing";
 import { overlaps, atMinute, moscowDate } from "../lib/scheduling";
@@ -76,5 +77,45 @@ describe("Безопасность", () => {
     expect(a).not.toBe(b);
     expect(verifyPassword("long-passphrase-123", a)).toBe(true);
     expect(verifyPassword("incorrect", a)).toBe(false);
+  });
+});
+
+describe("Origin запросов на Vercel", () => {
+  it("допускает только домен Production из настроек", () => {
+    expect(
+      allowedRequestOrigins(
+        { NODE_ENV: "production", APP_URL: "https://msoclin.vercel.app" },
+        "http://localhost:3000",
+      ),
+    ).toEqual(["https://msoclin.vercel.app"]);
+  });
+  it("разрешает точные адреса Preview, а не подставленный Host", () => {
+    expect(
+      allowedRequestOrigins(
+        {
+          NODE_ENV: "production",
+          VERCEL_ENV: "preview",
+          APP_URL: "https://msoclin.vercel.app",
+          VERCEL_URL: "msoclin-build.vercel.app",
+          VERCEL_BRANCH_URL: "msoclin-git-setup.vercel.app",
+        },
+        "https://attacker.example",
+      ),
+    ).toEqual([
+      "https://msoclin-build.vercel.app",
+      "https://msoclin-git-setup.vercel.app",
+    ]);
+  });
+  it("не принимает Preview hostname с путём или учетными данными", () => {
+    expect(
+      allowedRequestOrigins(
+        {
+          NODE_ENV: "production",
+          VERCEL_ENV: "preview",
+          VERCEL_URL: "safe.vercel.app@attacker.example/path",
+        },
+        "https://attacker.example",
+      ),
+    ).toEqual([]);
   });
 });
