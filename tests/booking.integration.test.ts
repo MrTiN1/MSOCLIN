@@ -6,6 +6,7 @@ import {
   atMinute,
   moscowDate,
   expireHolds,
+  loadAvailability,
 } from "../lib/scheduling";
 import { addDays, format } from "date-fns";
 import { randomBytes, randomUUID } from "crypto";
@@ -72,6 +73,41 @@ beforeEach(async () => {
 });
 afterAll(() => db.$disconnect());
 describe("Реальный PostgreSQL: ресурсные интервалы", () => {
+  it("месячный календарь учитывает занятость, блокировки и освобождение резерва", async () => {
+    await db.team.update({ where: { id: "team-2" }, data: { active: false } });
+    const booking = await createBooking(input());
+    await db.scheduleException.create({
+      data: {
+        teamId: "team-1",
+        startsAt: atMinute(day, 840),
+        endsAt: atMinute(day, 1020),
+        reason: "Проверка месячного календаря",
+      },
+    });
+    const month = day.slice(0, 7);
+    const lastDay = new Date(
+      Number(day.slice(0, 4)),
+      Number(day.slice(5, 7)),
+      0,
+    ).getDate();
+    const snapshot = await loadAvailability(
+      `${month}-01`,
+      `${month}-${lastDay}`,
+    );
+    const slots = await slotsForDay(day, 120, snapshot);
+    expect(slots.find((slot) => slot.time === "09:00")?.available).toBe(false);
+    expect(slots.find((slot) => slot.time === "14:00")?.available).toBe(false);
+    await changeBooking(booking.id, { status: "CANCELLED" }, "test-admin");
+    const refreshed = await loadAvailability(
+      `${month}-01`,
+      `${month}-${lastDay}`,
+    );
+    expect(
+      (await slotsForDay(day, 120, refreshed)).find(
+        (slot) => slot.time === "09:00",
+      )?.available,
+    ).toBe(true);
+  });
   it("две бригады принимают две записи на одно время, третья отклоняется", async () => {
     const results = await Promise.allSettled([
       createBooking(input()),

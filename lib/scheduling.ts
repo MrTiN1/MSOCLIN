@@ -51,15 +51,60 @@ export async function expireHolds(tx: Tx) {
     })),
   });
 }
+export async function loadAvailability(
+  firstDay: string,
+  lastDay = firstDay,
+  client: Tx = db,
+) {
+  const now = new Date();
+  const range = {
+    startsAt: {
+      lt: new Date(atMinute(lastDay, 0).getTime() + 86400000),
+    },
+    endsAt: { gt: atMinute(firstDay, 0) },
+  };
+  const [settings, teams] = await Promise.all([
+    policy(client),
+    client.team.findMany({
+      where: { active: true },
+      include: {
+        schedules: true,
+        exceptions: { where: range },
+        allocations: {
+          where: {
+            ...range,
+            active: true,
+            booking: {
+              OR: [
+                { status: { in: ["CONFIRMED", "IN_PROGRESS"] } },
+                {
+                  status: "PENDING",
+                  OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }],
+                },
+              ],
+            },
+          },
+          select: { bookingId: true, startsAt: true, endsAt: true },
+        },
+      },
+    }),
+  ]);
+  return { settings, teams, now };
+}
+type Availability = Awaited<ReturnType<typeof loadAvailability>>;
 export async function availableTeams(
   day: string,
   start: Date,
   duration: number,
   client: Tx = db,
   ignoreBookingId?: string,
+  snapshot?: Availability,
 ) {
-  const p = await policy(client);
-  const now = new Date();
+  const {
+    settings: p,
+    now,
+    teams,
+  } = snapshot ?? (await loadAvailability(day, day, client));
   const maxDay = format(
     addDays(new Date(moscowDate(now) + "T12:00:00Z"), p.horizonDays),
     "yyyy-MM-dd",
@@ -81,21 +126,9 @@ export async function availableTeams(
     start.getUTCMilliseconds()
   )
     return [];
-  const teams = await client.team.findMany({
-    where: { active: true },
-    include: {
-      schedules: { where: { weekday } },
-      exceptions: {
-        where: {
-          startsAt: { lt: atMinute(day, 1439) },
-          endsAt: { gt: atMinute(day, 0) },
-        },
-      },
-    },
-  });
   const free = [];
   for (const team of teams) {
-    const s = team.schedules[0];
+    const s = team.schedules.find((schedule) => schedule.weekday === weekday);
     if (
       !s ||
       startMin < s.startMinute ||
@@ -116,35 +149,27 @@ export async function availableTeams(
       continue;
     if (team.exceptions.some((e) => overlaps(start, end, e.startsAt, e.endsAt)))
       continue;
-    const conflict = await client.bookingResourceAllocation.findFirst({
-      where: {
-        teamId: team.id,
-        active: true,
-        bookingId: ignoreBookingId ? { not: ignoreBookingId } : undefined,
-        startsAt: { lt: end },
-        endsAt: { gt: start },
-        booking: {
-          OR: [
-            { status: { in: ["CONFIRMED", "IN_PROGRESS"] } },
-            {
-              status: "PENDING",
-              OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }],
-            },
-          ],
-        },
-      },
-    });
+    const conflict = team.allocations.some(
+      (allocation) =>
+        allocation.bookingId !== ignoreBookingId &&
+        overlaps(start, end, allocation.startsAt, allocation.endsAt),
+    );
     if (!conflict)
       free.push({ id: team.id, end, travelMinutes: team.travelMinutes });
   }
   return free;
 }
-export async function slotsForDay(day: string, duration: number) {
-  const p = await policy();
+export async function slotsForDay(
+  day: string,
+  duration: number,
+  snapshot?: Availability,
+) {
+  const availability = snapshot ?? (await loadAvailability(day));
+  const p = availability.settings;
   const weekday = new Date(day + "T12:00:00Z").getUTCDay();
-  const schedules = await db.teamSchedule.findMany({
-    where: { weekday, team: { active: true } },
-  });
+  const schedules = availability.teams.flatMap((team) =>
+    team.schedules.filter((schedule) => schedule.weekday === weekday),
+  );
   const starts = new Set<number>();
   for (const s of schedules)
     for (let m = s.startMinute; m < s.endMinute; m += p.slotStepMinutes)
@@ -152,7 +177,14 @@ export async function slotsForDay(day: string, duration: number) {
   const slots = [];
   for (const m of [...starts].sort((a, b) => a - b)) {
     const start = atMinute(day, m);
-    const free = await availableTeams(day, start, duration);
+    const free = await availableTeams(
+      day,
+      start,
+      duration,
+      db,
+      undefined,
+      availability,
+    );
     slots.push({
       time: formatInTimeZone(start, TZ, "HH:mm"),
       startsAt: start.toISOString(),

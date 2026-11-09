@@ -2,7 +2,12 @@ import { addDays, format } from "date-fns";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { getQuote } from "@/lib/pricing";
-import { slotsForDay, expireHolds, policy, moscowDate } from "@/lib/scheduling";
+import {
+  slotsForDay,
+  expireHolds,
+  loadAvailability,
+  moscowDate,
+} from "@/lib/scheduling";
 import { safeError, rateLimit, HttpError } from "@/lib/security";
 export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
@@ -20,12 +25,17 @@ export async function POST(req: NextRequest) {
       const year = Number(body.date.slice(0, 4)),
         month = Number(body.date.slice(5, 7));
       const days = new Date(year, month, 0).getDate();
+      const prefix = body.date.slice(0, 7);
+      const snapshot = await loadAvailability(
+        `${prefix}-01`,
+        `${prefix}-${String(days).padStart(2, "0")}`,
+      );
       const available: Record<string, boolean> = {};
       for (let n = 1; n <= days; n++) {
         const date = `${year}-${String(month).padStart(2, "0")}-${String(n).padStart(2, "0")}`;
-        available[date] = (await slotsForDay(date, quote.durationMinutes)).some(
-          (s) => s.available,
-        );
+        available[date] = (
+          await slotsForDay(date, quote.durationMinutes, snapshot)
+        ).some((s) => s.available);
       }
       return Response.json(
         {
@@ -33,7 +43,7 @@ export async function POST(req: NextRequest) {
           horizonDate: format(
             addDays(
               new Date(moscowDate() + "T12:00:00Z"),
-              (await policy()).horizonDays,
+              snapshot.settings.horizonDays,
             ),
             "yyyy-MM-dd",
           ),
